@@ -9,19 +9,40 @@ const stripe = Stripe('sk_test_51O9f3CB5dHGF8zjRRXF4AKy05Rb0R5Zgr9m0NG1mDgZwq52Q
 app.use(cors());
 app.use(bodyParser.json());
 
-const PRODUCT_ID = 'hope_donate_001';
-const PRODUCT_NAME = 'Hope Donation';
+const PLAN_IDS = {
+    day: 'plan_day_001',
+    week: 'plan_week_001',
+    month: 'plan_month_001',
+    year : 'plan_year_001'
+};
 
-// Function to ensure product exists
-const ensureProductExists = async () => {
+const PLAN_INTERVALS = {
+    day: { interval: 'day', interval_count: 1 },
+    week: { interval: 'day', interval_count: 7 },
+    month: { interval: 'month', interval_count: 1 },
+    year: { interval: 'year', interval_count: 1 }
+};
+
+// Ensure plan exists, create if it doesn't
+const ensurePlanExists = async (donation_type, amount) => {
+    const planId = PLAN_IDS[donation_type];
+    const intervalDetails = PLAN_INTERVALS[donation_type];
+
     try {
-        await stripe.products.retrieve(PRODUCT_ID);
+        await stripe.plans.retrieve(planId);
     } catch (error) {
         if (error.code === 'resource_missing') {
-            // Product does not exist, create it
-            await stripe.products.create({
-                id: PRODUCT_ID,
-                name: PRODUCT_NAME,
+            
+            const currAmount = amount * 100;
+            await stripe.plans.create({
+                id: `${planId}_${currAmount}`,
+                amount: currAmount,
+                currency: 'aud',
+                interval: intervalDetails.interval,
+                interval_count: intervalDetails.interval_count,
+                product: {
+                    name: `Hope Donation (${donation_type} - ${currAmount})`
+                }
             });
         } else {
             throw error;
@@ -35,7 +56,7 @@ app.post('/create-payment-intent', async (req, res) => {
     try {
         const paymentIntent = await stripe.paymentIntents.create({
             amount: amount * 100,
-            currency: 'usd',
+            currency: 'aud',
             payment_method_types: ['card'],
             metadata: {
                 first_name,
@@ -58,7 +79,7 @@ app.post('/create-subscription', async (req, res) => {
     const { payment_method, first_name, last_name, email, phone, donation_type, amount } = req.body;
 
     try {
-        await ensureProductExists();
+        await ensurePlanExists(donation_type, amount);
 
         const customer = await stripe.customers.create({
             payment_method: payment_method,
@@ -70,17 +91,13 @@ app.post('/create-subscription', async (req, res) => {
             },
         });
 
+        const planId = PLAN_IDS[donation_type];
+        const currAmount = amount * 100;
+
         const subscription = await stripe.subscriptions.create({
             customer: customer.id,
             items: [{
-                price_data: {
-                    currency: 'usd',
-                    product: PRODUCT_ID,
-                    recurring: {
-                        interval: donation_type, // daily, monthly, quarterly, yearly
-                    },
-                    unit_amount: amount * 100,
-                },
+                plan: `${planId}_${currAmount}`,
             }],
             expand: ['latest_invoice.payment_intent'],
         });
