@@ -62,10 +62,10 @@
         <label for="donation_type">Donation Type</label>
         <select id="donation_type" name="donation_type" required>
             <option selected value="once">Once</option>
-            <option value="daily">Daily</option>
-            <option value="monthly">Monthly</option>
-            <option value="quarterly">Quarterly</option>
-            <option value="yearly">Yearly</option>
+            <option value="day">Daily</option>
+            <option value="week">Daily</option>
+            <option value="month">Monthly</option>
+            <option value="year">Yearly</option>
         </select>
         
         <label for="amount">Amount</label>
@@ -90,8 +90,8 @@
                 e.preventDefault();
 
                 var gateway = $('#gateway').val();
-
-                stripe.createPaymentMethod({
+                var donationType = $('#donation_type').val();
+                var paymentMethodData = {
                     type: 'card',
                     card: card,
                     billing_details: {
@@ -99,7 +99,9 @@
                         email: $('#email').val(),
                         phone: $('#phone').val()
                     }
-                }).then(function(result) {
+                };
+
+                stripe.createPaymentMethod(paymentMethodData).then(function(result) {
                     if (result.error) {
                         $('#card-errors').text(result.error.message);
                     } else {
@@ -109,23 +111,20 @@
                             last_name: $('#last_name').val(),
                             email: $('#email').val(),
                             phone: $('#phone').val(),
-                            donation_type: $('#donation_type').val(),
+                            donation_type: donationType,
                             amount: $('#amount').val()
                         };
 
-                        var apiEndpoint, method, contentType, data;
-
+                        var apiEndpoint;
                         if (gateway === 'stripe') {
-                            apiEndpoint = 'http://localhost:3000/create-payment-intent';
-                            method = 'POST';
-                            contentType = 'application/json';
-                            data = JSON.stringify(paymentData);
+                            apiEndpoint = donationType === 'once' ? 'http://localhost:3000/create-payment-intent' : 'http://localhost:3000/create-subscription';
                         } else if (gateway === 'profiler') {
                             apiEndpoint = 'http://localhost:3000/profiler-endpoint';
-                            method = 'POST';
-                            contentType = 'application/json';
-                            data = JSON.stringify(paymentData);
                         }
+
+                        var method = 'POST';
+                        var contentType = 'application/json';
+                        var data = JSON.stringify(paymentData);
 
                         $('#result').html(`
                             <strong>API Endpoint:</strong> ${apiEndpoint}<br>
@@ -134,46 +133,43 @@
                             <strong>Data:</strong> ${data}
                         `);
 
+                        if(gateway !== 'profiler'){
+
+
                         setTimeout(function() {
-                            if (gateway === 'stripe') {
-                                $.ajax({
-                                    url: apiEndpoint,
-                                    method: method,
-                                    contentType: contentType,
-                                    data: data,
-                                    success: function(response) {
-                                        stripe.confirmCardPayment(response.clientSecret, {
-                                            payment_method: paymentData.payment_method
-                                        }).then(function(result) {
-                                            if (result.error) {
-                                                $('#card-errors').text(result.error.message);
-                                            } else {
-                                                if (result.paymentIntent.status === 'succeeded') {
-                                                    alert('Donation successful!');
+                            $.ajax({
+                                url: apiEndpoint,
+                                method: method,
+                                contentType: contentType,
+                                data: data,
+                                success: function(response) {
+                                    if (gateway === 'stripe') {
+                                        if (donationType === 'once') {
+                                            stripe.confirmCardPayment(response.clientSecret, {
+                                                payment_method: paymentData.payment_method
+                                            }).then(function(result) {
+                                                if (result.error) {
+                                                    $('#card-errors').text(result.error.message);
+                                                } else {
+                                                    if (result.paymentIntent.status === 'succeeded') {
+                                                        alert('Donation successful!');
+                                                    }
                                                 }
-                                            }
-                                        });
-                                    },
-                                    error: function(error) {
-                                        $('#card-errors').text(error.responseJSON.error);
+                                            });
+                                        } else {
+                                            alert('Subscription successful!');
+                                        }
+                                    } else if (gateway === 'profiler') {
+                                        alert('Profiler token received: ' + response.token);
                                     }
-                                });
-                            } else if (gateway === 'profiler') {
-                                // $.ajax({
-                                //     url: apiEndpoint,
-                                //     method: method,
-                                //     contentType: contentType,
-                                //     data: data,
-                                //     success: function(response) {
-                                //         // Handle profiler response if needed
-                                //         alert('Profiler token received: ' + response.token);
-                                //     },
-                                //     error: function(error) {
-                                //         $('#card-errors').text(error.responseJSON.error);
-                                //     }
-                                // });
-                            }
-                        }, 3000); // Delay to show the result before processing
+                                },
+                                error: function(error) {
+                                    $('#card-errors').text(error.responseJSON.error);
+                                }
+                            });
+                        }, 1000); // Delay to show the result before processing
+                    }
+
                     }
                 });
             });
