@@ -25,15 +25,16 @@ const PLAN_INTERVALS = {
 
 // Ensure plan exists, create if it doesn't
 const ensurePlanExists = async (donation_type, amount) => {
+    const currAmount = amount * 100;
+
     const planId = PLAN_IDS[donation_type];
     const intervalDetails = PLAN_INTERVALS[donation_type];
 
     try {
-        await stripe.plans.retrieve(planId);
+        await stripe.plans.retrieve(`${planId}_${currAmount}`);
     } catch (error) {
         if (error.code === 'resource_missing') {
             
-            const currAmount = amount * 100;
             await stripe.plans.create({
                 id: `${planId}_${currAmount}`,
                 amount: currAmount,
