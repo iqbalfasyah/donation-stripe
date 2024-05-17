@@ -44,7 +44,7 @@
         <label for="gateway">Use Profiler as Gateway</label>
         <select id="gateway" name="gateway" required>
             <option value="stripe">No</option>
-            <option value="profiler">Yes</option>
+            <option value="profiler" selected>Yes</option>
         </select>
 
         <label for="first_name">First Name</label>
@@ -70,10 +70,21 @@
         
         <label for="amount">Amount</label>
         <input type="number" id="amount" name="amount" value="50" required>
-        
-        <label for="card-element">Card Details</label>
-        <div id="card-element"></div>
-        
+
+        <label for="input_type">Input Type</label>
+        <select id="input_type" name="input_type" required>
+            <option value="auto">Auto - Payment Method</option>
+            <option value="manual" selected>Manual - Card Details</option>
+        </select>
+
+        <div id="section-auto-input" style="display: none;">
+            <label for="payment_method">Payment Method</label>
+            <input type="text" id="payment_method" name="payment_method" value="pm_1PHM1uB5dHGF8zjRjz0sVCbV">
+        </div>
+        <div id="section-manual-input" style="display: block;">
+            <label for="card-element">Card Details</label>
+            <div id="card-element"></div>
+        </div>
         <button type="submit">Donate</button>
     </form>
     <div id="card-errors" role="alert"></div>
@@ -90,8 +101,41 @@
             var card = elements.create('card');
             card.mount('#card-element');
 
-            $('#donation-form').on('submit', function(e) {
+            $("#input_type").on("change", function(){
+                let currVal = $(this).val();
+                if(currVal == "auto"){
+                    $("#section-auto-input").css("display", "block");
+                    $("#section-manual-input").css("display", "none");
+                }else{
+                    $("#section-auto-input").css("display", "none");
+                    $("#section-manual-input").css("display", "block"); 
+                }
+            });
+
+            async function createCustomer(paymentData) {
+                return new Promise((resolve, reject) => {
+                    $.ajax({
+                        url: 'http://localhost:3000/create-customer',
+                        method: 'POST',
+                        contentType: 'application/json',
+                        data: JSON.stringify(paymentData),
+                        success: function(response) {
+                            resolve(response);
+                        },
+                        error: function(jqXHR, textStatus, errorThrown) {
+                            reject(errorThrown);
+                            alert(errorThrown);
+                        }
+                    });
+                });
+            }
+
+            $('#donation-form').on('submit', async function(e) {
                 e.preventDefault();
+
+                $('#response').text("");
+                $('#card-errors').text("");
+                $('#request-detail').text("");
 
                 var gateway = $('#gateway').val();
                 var donationType = $('#donation_type').val();
@@ -105,12 +149,22 @@
                     }
                 };
 
-                stripe.createPaymentMethod(paymentMethodData).then(function(result) {
-                    if (result.error) {
-                        $('#card-errors').text(result.error.message);
-                    } else {
-                        var paymentData = {
-                            payment_method: result.paymentMethod.id,
+                let payment_method_id =  $("#input_type").val() == "manual" ? '' : $('#payment_method').val();
+                if($("#input_type").val() == "manual"){
+                    await stripe.createPaymentMethod(paymentMethodData).then(async function(result) {
+                        if (result.error) {
+                            $('#card-errors').text(result.error.message);
+                            alert("Create Payment Method Failed!");
+                        } else {
+                            payment_method_id = result.paymentMethod.id;
+                        }
+                     });
+                }
+               
+                if(payment_method_id != ""){
+
+                    var paymentData = {
+                            payment_method: payment_method_id,
                             first_name: $('#first_name').val(),
                             last_name: $('#last_name').val(),
                             email: $('#email').val(),
@@ -118,67 +172,70 @@
                             donation_type: donationType,
                             amount: $('#amount').val()
                         };
+                        
+                        //Create Customer
+                        const response = await createCustomer(paymentData);
+                        paymentData.customer_id = response.customerId;
 
-                        var apiEndpoint;
-                        if (gateway === 'stripe') {
+                        if(gateway === 'profiler'){
+                            $('#response').text(JSON.stringify(paymentData));
+                        }else{
                             apiEndpoint = donationType === 'once' ? 'http://localhost:3000/create-payment-intent' : 'http://localhost:3000/create-subscription';
-                        } else if (gateway === 'profiler') {
-                            apiEndpoint = 'http://localhost:3000/profiler-endpoint';
+                    
+                            var method = 'POST';
+                            var contentType = 'application/json';
+                            var data = JSON.stringify(paymentData);
+
+                            $('#request-detail').html(`
+                                <strong>API Endpoint:</strong> ${apiEndpoint}<br>
+                                <strong>Method:</strong> ${method}<br>
+                                <strong>Content-Type:</strong> ${contentType}<br>
+                                <strong>Data:</strong> ${data}
+                            `);
+
+                            setTimeout(function() {
+                                    $.ajax({
+                                        url: apiEndpoint,
+                                        method: method,
+                                        contentType: contentType,
+                                        data: data,
+                                        success: function(response) {
+                                            
+                                            $('#response').text(JSON.stringify(response));
+
+                                            if (gateway === 'stripe') {
+                                                if (donationType === 'once') {
+                                                    stripe.confirmCardPayment(response.clientSecret, {
+                                                        payment_method: paymentData.payment_method
+                                                    }).then(function(result) {
+                                                        if (result.error) {
+                                                            $('#card-errors').text(result.error.message);
+                                                        } else {
+                                                            if (result.paymentIntent.status === 'succeeded') {
+                                                                alert('Donation once successful!');
+                                                            }
+                                                        }
+                                                    });
+                                                } else {
+                                                    alert('Subscription successful!');
+                                                }
+                                            } else if (gateway === 'profiler') {
+                                                alert('Donation will Process in Profiler');
+                                            }
+                                        },
+                                        error: function(error) {
+                                            $('#card-errors').text(error.responseJSON.error);
+                                        }
+                                    });
+                                }, 1000); // Delay to show the result before processing
+                                
                         }
 
-                        var method = 'POST';
-                        var contentType = 'application/json';
-                        var data = JSON.stringify(paymentData);
+                }else{
+                    $('#card-errors').text("Input Type: Auto - Payment Method cannot be empty.");
+                }
+                        
 
-                        $('#request-detail').html(`
-                            <strong>API Endpoint:</strong> ${apiEndpoint}<br>
-                            <strong>Method:</strong> ${method}<br>
-                            <strong>Content-Type:</strong> ${contentType}<br>
-                            <strong>Data:</strong> ${data}
-                        `);
-
-                        if(gateway !== 'profiler'){
-
-
-                        setTimeout(function() {
-                            $.ajax({
-                                url: apiEndpoint,
-                                method: method,
-                                contentType: contentType,
-                                data: data,
-                                success: function(response) {
-                                    
-                                    $('#response').text(JSON.stringify(response));
-
-                                    if (gateway === 'stripe') {
-                                        if (donationType === 'once') {
-                                            stripe.confirmCardPayment(response.clientSecret, {
-                                                payment_method: paymentData.payment_method
-                                            }).then(function(result) {
-                                                if (result.error) {
-                                                    $('#card-errors').text(result.error.message);
-                                                } else {
-                                                    if (result.paymentIntent.status === 'succeeded') {
-                                                        alert('Donation once successful!');
-                                                    }
-                                                }
-                                            });
-                                        } else {
-                                            alert('Subscription successful!');
-                                        }
-                                    } else if (gateway === 'profiler') {
-                                        alert('Donation will Process in Profiler');
-                                    }
-                                },
-                                error: function(error) {
-                                    $('#card-errors').text(error.responseJSON.error);
-                                }
-                            });
-                        }, 1000); // Delay to show the result before processing
-                    }
-
-                    }
-                });
             });
         });
     </script>

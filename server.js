@@ -52,12 +52,13 @@ const ensurePlanExists = async (donation_type, amount) => {
 };
 
 app.post('/create-payment-intent', async (req, res) => {
-    const { amount, first_name, last_name, email, phone, donation_type, payment_method } = req.body;
+    const { amount, first_name, last_name, email, phone, donation_type, payment_method, customer_id } = req.body;
 
     try {
         const paymentIntent = await stripe.paymentIntents.create({
             amount: amount * 100,
             payment_method: payment_method,
+            customer: customer_id,
             currency: 'aud',
             payment_method_types: ['card'],
             metadata: {
@@ -70,6 +71,8 @@ app.post('/create-payment-intent', async (req, res) => {
         });
 
         res.send({
+            is_success: true,
+            message: "Donation Success",
             clientSecret: paymentIntent.client_secret,
         });
     } catch (e) {
@@ -77,27 +80,52 @@ app.post('/create-payment-intent', async (req, res) => {
     }
 });
 
+app.post('/create-customer', async (req, res) => {
+    const { first_name, last_name, email, phone, payment_method } = req.body;
+
+    try {
+
+        let customerId = '';
+        const customers = await stripe.customers.search({
+            query: `email:\'${email}\' AND name:\'${first_name} ${last_name}\' AND phone:\'${phone}\'`,
+        });
+
+        if(customers.data.length){
+            customerId = customers.data[0].id;
+        }else{
+            const customer = await stripe.customers.create({
+                payment_method: payment_method,
+                email: email,
+                name: `${first_name} ${last_name}`,
+                phone: phone,
+                invoice_settings: {
+                    default_payment_method: payment_method,
+                },
+            });
+
+            customerId = customer.id;
+        }
+
+        res.send({
+            customerId: customerId,
+        });
+
+    } catch (e) {
+        res.status(500).send({ error: e.message });
+    }
+});
+
 app.post('/create-subscription', async (req, res) => {
-    const { payment_method, first_name, last_name, email, phone, donation_type, amount } = req.body;
+    const { donation_type, amount, customer_id } = req.body;
 
     try {
         await ensurePlanExists(donation_type, amount);
-
-        const customer = await stripe.customers.create({
-            payment_method: payment_method,
-            email: email,
-            name: `${first_name} ${last_name}`,
-            phone: phone,
-            invoice_settings: {
-                default_payment_method: payment_method,
-            },
-        });
 
         const planId = PLAN_IDS[donation_type];
         const currAmount = amount * 100;
 
         const subscription = await stripe.subscriptions.create({
-            customer: customer.id,
+            customer: customer_id,
             items: [{
                 plan: `${planId}_${currAmount}`,
             }],
@@ -105,6 +133,8 @@ app.post('/create-subscription', async (req, res) => {
         });
 
         res.send({
+            is_success: true,
+            message: "Donation Subscription Success",
             subscriptionId: subscription.id,
             clientSecret: subscription.latest_invoice.payment_intent.client_secret,
         });
