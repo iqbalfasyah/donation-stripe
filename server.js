@@ -52,11 +52,12 @@ const ensurePlanExists = async (donation_type, amount) => {
 };
 
 app.post('/create-payment-intent', async (req, res) => {
-    const { amount, first_name, last_name, email, phone, donation_type } = req.body;
+    const { amount, first_name, last_name, email, phone, donation_type, payment_method } = req.body;
 
     try {
         const paymentIntent = await stripe.paymentIntents.create({
             amount: amount * 100,
+            payment_method: payment_method,
             currency: 'aud',
             payment_method_types: ['card'],
             metadata: {
